@@ -21,3 +21,14 @@ CANdb++로 설계한 네트워크에서 Driver 노드와 Vehicle_ECU 노드를 C
 - Eco / Standard / Sport 모드별 가속·연비·제동 파라미터
 
 > 원본은 CP949였던 파일을 GitHub에서 읽을 수 있도록 UTF-8로 변환했습니다. (`/*@!Encoding:65001*/`)
+
+## 로직 재현 시뮬레이션 (`tools/`)
+
+![CAPL 로직 재현 시뮬레이션](tools/vehicle_simulation.png)
+
+`Driver.can`·`VehicleECU.can`의 계산식(페달 램프, 크립·가속·제동, 모드별 파라미터, 주행 중 변속 거부)을 Python으로 그대로 옮겨 시나리오를 돌린 결과입니다. CANoe 측정 화면이 아니라 동작을 확인하기 위한 재현입니다.
+
+```bash
+pip install matplotlib
+python tools/simulate_vehicle.py
+```
