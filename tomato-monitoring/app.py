@@ -15,7 +15,7 @@ from flask import Flask, jsonify, render_template
 
 from sensors import SensorHub
 
-READ_INTERVAL_SEC = 2.0  # AM2302 최소 측정 간격
+READ_INTERVAL_SEC = float(os.environ.get("TOMATO_INTERVAL", "2.0"))  # AM2302 최소 측정 간격 2초
 HISTORY_LEN = 300        # 약 10분
 
 # 토마토 적정 범위 (lo, hi, 범위를 벗어났을 때 0점이 되는 거리)

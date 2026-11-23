@@ -27,6 +27,8 @@
 
 *센서 없이 모의 데이터(`TOMATO_MOCK=1`)로 실행한 화면입니다.*
 
+재연 영상: [docs/dashboard_demo.webm](docs/dashboard_demo.webm) (`TOMATO_MOCK=demo`로 정상 → 고온·건조 → 미세먼지 → 사람 접근 → 회복 60초 시나리오 실행, 모의 데이터)
+
 ## 생육 점수 기준
 | 항목 | 적정 범위 |
 |---|---|
@@ -44,7 +46,8 @@ pip install -r requirements.txt
 python app.py            # http://<라즈베리파이 IP>:5000
 
 # 센서 없이 PC에서 대시보드만 확인
-TOMATO_MOCK=1 python app.py
+TOMATO_MOCK=1 python app.py      # 무작위 모의 값
+TOMATO_MOCK=demo TOMATO_INTERVAL=0.5 python app.py   # 60초 재연 시나리오
 ```
 
 ## 개선 방향

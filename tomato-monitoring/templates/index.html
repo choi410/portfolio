@@ -112,7 +112,7 @@ function drawChart(h){
 async function tick(){
   try { render(await (await fetch("/api/data")).json()); } catch (e) { statusText.textContent = "서버 연결 끊김"; }
 }
-tick(); setInterval(tick, 2000);
+tick(); setInterval(tick, 1000);
 </script>
 </body>
 </html>

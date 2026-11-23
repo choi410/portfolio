@@ -10,13 +10,16 @@
 - AM312 OUT           -> GPIO17 (Pin 11)
 
 TOMATO_MOCK=1 이면 하드웨어 없이 가상 값을 만든다 (PC에서 대시보드 테스트용).
+TOMATO_MOCK=demo 이면 정상 → 고온·건조 → 미세먼지 → 사람 접근 → 회복 순서의 60초 재연 시나리오를 돈다.
 """
 import math
 import os
 import random
 import time
 
-MOCK = os.environ.get("TOMATO_MOCK") == "1"
+MOCK_MODE = os.environ.get("TOMATO_MOCK", "")
+MOCK = MOCK_MODE in ("1", "demo")
+DEMO_START = time.time()
 
 DHT_PIN = 4
 US_TRIG_PIN = 23
@@ -127,7 +130,7 @@ class SensorHub:
 
     def read_all(self):
         if MOCK:
-            return mock_reading()
+            return demo_reading() if MOCK_MODE == "demo" else mock_reading()
         temp, hum = self._safe("dht", (None, None))
         pm25, pm10 = self._safe("sds", (None, None))
         sds = self.sensors.get("sds")
@@ -155,4 +158,33 @@ def mock_reading():
         "light": int(60 + 30 * math.sin(t / 4)),
         "distance": round(80 + random.uniform(-3, 3), 1),
         "motion": random.random() < 0.15,
+    }
+
+
+# (시각 s, 온도, 습도, PM2.5, 조도%, 거리cm) 키프레임 사이를 선형 보간
+DEMO_KEYS = [
+    (0, 24.0, 68, 8, 72, 80), (10, 24.5, 66, 9, 70, 80),
+    (22, 31.0, 58, 10, 85, 80), (32, 31.5, 44, 12, 88, 80),
+    (38, 30.0, 46, 36, 80, 80), (44, 28.0, 50, 30, 75, 35),
+    (52, 25.0, 62, 14, 72, 80), (60, 24.0, 68, 8, 72, 80),
+]
+
+
+def demo_reading():
+    t = (time.time() - DEMO_START) % 60
+    for (t0, *a), (t1, *b) in zip(DEMO_KEYS, DEMO_KEYS[1:]):
+        if t0 <= t <= t1:
+            r = (t - t0) / (t1 - t0)
+            temp, hum, pm25, light, dist = [x + (y - x) * r for x, y in zip(a, b)]
+            break
+    n = lambda s: random.uniform(-s, s)
+    return {
+        "temperature": round(temp + n(0.15), 1),
+        "humidity": round(hum + n(0.6), 1),
+        "pm25": round(max(0, pm25 + n(0.5)), 1),
+        "pm10": round(max(0, pm25 * 1.7 + n(0.8)), 1),
+        "pm_warming_up": False,
+        "light": int(light + n(1)),
+        "distance": round(dist + n(1.0), 1),
+        "motion": 40 <= t <= 47,
     }
