@@ -2,7 +2,8 @@
 
 Factory I/O 가상 자동창고와 LS XG5000 PLC를 Modbus TCP로 연동해, Vision 센서가 인식한 팔레트 색상(1=파랑 → 왼쪽, 4=초록 → 오른쪽)에 따라 스태커 크레인이 랙에 순차 적재하는 래더 프로그램입니다. (2025.12)
 
-- `ladder_program.pdf`: XG5000 래더 프로그램 전체 출력본
+- `AutomatedWarehouse_StackerCrane.xgwx`: LS XG5000 프로젝트 원본 (XG5000에서 열기)
+- `ladder_program.pdf`: 래더 프로그램 전체 출력본 (XG5000 없이 보기용)
 
 ## 핵심 로직
 - M 비트 기반 상태 전이: 투입 → 색상 인식 → 위치 계산 → X/Z 이동·적재 → Home 복귀 → 대기
