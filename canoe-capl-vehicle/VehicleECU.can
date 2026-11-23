@@ -1,0 +1,257 @@
+/*@!Encoding:65001*/ //한국어 작성을 위해
+
+variables
+{
+  // 타이머 및 메시지 객체
+  msTimer speed_Calculation_Timer; //타이머 설정.
+  message Speed msg_Speed; // db+ 메시지 스피드를 msg_speed로 설정.
+
+  const long DRIVER_INPUT_PERIOD_MS = 100; // 드라이버와 주기를 맞추기 위한 상수
+  // 차량 상태 변수 (값이 가변 될수 있으므로 const X)
+  double currentSpeed = 0.0; //자연감속과 같은 미세한 변화를 감지 하기 위해 double선언. long X
+  long current_Display_Speed = 0; //계기판에 표시될 속도 값입니다. 후진 시에는 음수(-)로 표현.
+  //최종적으로 CAN 신호에 담기 위해 long(정수) 타입을 사용. double형은 사용불가. 캔 통신은 정수형만 가능하다.(int long) double형을 써야 할 경우 스케일링을 통해 정수형 만들기!
+  double currentFuelEfficiency = 0.0;
+
+  //RX
+  // 입력 신호 수신 변수 
+  int received_Gear = 0; //드라이버 노드의 gear 값 받는 변수.
+  int received_Break_pedal = 0; //드라이버 노드의 Break_pedal 값 받는 변수.
+  int received_Forward_pedal = 0; //드라이버 노드의 Forward_pedal 값 받는 변수.
+  int received_Drive_mode = 0; //드라이버 노드의 Drive_mode 값 받는 변수.
+
+  // 디버깅 출력용 문자열
+  char gearString[10]; //snprint를 사용하기 위해 담아둘 공간 확보. ex)파킹(P) 한국어2바이트 (p)\n 1바이트씩 4+4바이트가 필요.
+
+  // 동적 상수 및 제한값 (const 유무)
+  const long MAX_SPEED_FORWARD = 250;
+  const long MAX_SPEED_REVERSE = 100;
+  const long DRIVE_AUTO_CREEP_SPEED_LIMIT = 20; //크립모드
+  const long DRIVE_AUTO_CREEP_INCREMENT = 2; //크립모드 속도 상승값.
+
+  const double BASE_DECELERATION_RATE = 2.0;//최소 감속량. decel_range = MAX_BRAKE_DECEL_FACTOR - Basic_BreakDecel_Rate; 이 부분에서 쓰임.
+  const double MAX_BRAKE_DECEL_FACTOR = 10.0;//최대 감속량
+  const double NATURAL_DECEL_RATE = 0.5; //자연감소율
+
+  const double ACCEL_STANDARD_BASE = 0.5; //최소 가속량
+  const double ACCEL_STANDARD_MAX_FACTOR = 10.0; //최대 가속계수
+  const double ACCEL_SPORT_ADJ = 3.0; //스포츠모드 가속보정값
+  const double ACCEL_ECO_ADJ = -2.0; //에코모드 가속보정값
+
+  const double FUEL_STANDARD = 15.0; //기본연비
+  const double FUEL_ECO_ADJ = 9.0; //에코모드 연비보정값
+  const double FUEL_SPORT_ADJ = -9.0; //스포츠모드 연비보정값
+
+  // 동적 계산을 위한 변수((const 유무)), 가변 가능함.
+  double current_Drive_Mode_Accel_Base; //주행모드에 따른 엑셀 변화
+  double current_Drive_Mode_Accel_MaxFactor; //주행모드에 따른 최대 가속계수 변화
+  double current_Drive_Mode_FuelBase; //주행모드에 따른 연비 변화
+  double Basic_BreakDecel_Rate; //기본제동력
+}
+
+on start //setTimer(,)에서 시간을 자율적으로－ 조절 가능.
+{
+  write("VehicleECU CAPL 시작.");
+
+  // 메시지 객체 초기화
+  msg_Speed.id = 0x200; //candb++ id 주소
+  msg_Speed.dlc = 4;
+  msg_Speed.speed_signal = 0;
+  msg_Speed.Fuel_Efficiency = 0;
+  msg_Speed.Display_Speed = 0;
+
+  // 동적 변수 초기화
+  current_Drive_Mode_Accel_Base = ACCEL_STANDARD_BASE;// 0.5
+  current_Drive_Mode_Accel_MaxFactor = ACCEL_STANDARD_MAX_FACTOR;// 10
+  current_Drive_Mode_FuelBase = FUEL_STANDARD;// 15
+  Basic_BreakDecel_Rate = BASE_DECELERATION_RATE;// 2
+
+  setTimer(speed_Calculation_Timer, DRIVER_INPUT_PERIOD_MS); // 100ms로 설정함.
+}
+
+on message GearControl // on message는 CAPL 프로그래밍의 핵심으로, 다른 노드가 보낸 CAN 메시지를 "수신했을 때" 어떤 동작을 할지 정의하는 부분.
+{
+  // 0km/h가 아닐 때 기어 변경을 원천 차단하는 로직
+
+  // 1. 현재 속도가 0이 아니고, 들어온 기어 신호가 현재 기어와 다르면 (즉, '변속 시도'가 있으면)
+  if (currentSpeed != 0.0 && this.Gear != received_Gear)
+  {
+    // 2. 경고 메시지를 출력하고,
+    write("VehicleECU: 변속 실패! 차량이 정지한 상태에서만 기어 변경이 가능합니다. (현재 속도: %.2f km/h)", currentSpeed);
+    // 3. 아무것도 하지 않고 함수를 즉시 종료합니다. (receivedGear 변수가 업데이트되지 않음)
+    return;
+  }
+
+  // 4. 위 조건에 걸리지 않았을 때 (즉, 0km/h일 때)만 기어 상태를 정상적으로 업데이트합니다.
+  received_Gear = this.Gear;
+
+  // 기어 상태 문자열 변환 (0:P, 1:D, 2:R, 3:N)
+  if (received_Gear == 0)      snprintf(gearString, elcount(gearString), "파킹(P)");
+  else if (received_Gear == 1) snprintf(gearString, elcount(gearString), "주행(D)");
+  else if (received_Gear == 2) snprintf(gearString, elcount(gearString), "후진(R)");
+  else                         snprintf(gearString, elcount(gearString), "중립(N)");
+
+  write("VehicleECU: 기어 수신. 현재 기어: %d (%s)", received_Gear, gearString);
+}
+
+on message Driver_input
+{
+  received_Break_pedal = this.Break_pedal;
+  received_Forward_pedal = this.Forward_pedal;
+  received_Drive_mode = this.Drive_mode;
+
+  // 주행 모드에 따른 파라미터 변경
+  switch(received_Drive_mode)
+  {
+    case 0: // Standard
+      
+      current_Drive_Mode_Accel_Base = ACCEL_STANDARD_BASE;
+      current_Drive_Mode_Accel_MaxFactor = ACCEL_STANDARD_MAX_FACTOR;
+      current_Drive_Mode_FuelBase = FUEL_STANDARD;
+      Basic_BreakDecel_Rate = BASE_DECELERATION_RATE;
+      break;
+
+    case 1: // Eco
+      
+      current_Drive_Mode_Accel_Base = ACCEL_STANDARD_BASE + ACCEL_ECO_ADJ;
+      current_Drive_Mode_Accel_MaxFactor = ACCEL_STANDARD_MAX_FACTOR + ACCEL_ECO_ADJ;
+      if (current_Drive_Mode_Accel_Base < 0.1)
+        current_Drive_Mode_Accel_Base = 0.1;
+      
+      if (current_Drive_Mode_Accel_MaxFactor < 0.2)
+        current_Drive_Mode_Accel_MaxFactor = 0.2;
+      
+      current_Drive_Mode_FuelBase = FUEL_STANDARD + FUEL_ECO_ADJ;
+      Basic_BreakDecel_Rate = BASE_DECELERATION_RATE;
+      break;
+
+    case 2: // Sport
+      
+      current_Drive_Mode_Accel_Base = ACCEL_STANDARD_BASE + ACCEL_SPORT_ADJ;
+      current_Drive_Mode_Accel_MaxFactor = ACCEL_STANDARD_MAX_FACTOR + ACCEL_SPORT_ADJ;
+      current_Drive_Mode_FuelBase = FUEL_STANDARD + FUEL_SPORT_ADJ;
+      // 스포츠 모드는 제동력도 더 강하게 설정
+      Basic_BreakDecel_Rate = BASE_DECELERATION_RATE + 2.0;
+      break;
+  }
+}
+
+on timer speed_Calculation_Timer
+{
+  // 지역 변수 선언
+  double received_break_perc;
+  double decel_range;
+  double dynamic_deceleration;
+  double received_forward_perc;
+  double accel_range;
+  double dynamic_acceleration;
+
+  // 브레이크 동작 (최우선 순위) 엑셀과 브레이크 동시에 밟더라도 브레이크가 우선이다.
+  if (received_Break_pedal > 0)
+  {
+    received_break_perc = (double)received_Break_pedal / 100.0; //100까지 오르면 1, received_break_perc=1
+  
+    decel_range = MAX_BRAKE_DECEL_FACTOR - Basic_BreakDecel_Rate; //10-2 sport mod에선 10-4, decel_range=8
+    dynamic_deceleration = Basic_BreakDecel_Rate + (received_break_perc * decel_range); //2+(8*1)=10 N ms에 10km감속
+  
+    currentSpeed = currentSpeed - dynamic_deceleration; //감속
+    if (currentSpeed < 0) currentSpeed = 0.0;
+  }
+
+  else
+  {
+    switch(received_Gear)
+    {
+      case 0: // Park (P)
+      case 3: // Neutral (N)
+        currentSpeed = 0.0;
+        break;
+      
+      case 1: // Drive (D)
+        if (received_Forward_pedal > 0) // 가속
+        {
+          received_forward_perc = (double)received_Forward_pedal / 100.0; //100까지 오르면 1
+          accel_range = current_Drive_Mode_Accel_MaxFactor - current_Drive_Mode_Accel_Base; //accel_range= 10 - 0.5
+          dynamic_acceleration = current_Drive_Mode_Accel_Base + (received_forward_perc * accel_range); //dynamic_acceleration=0.5+9.5
+          currentSpeed = currentSpeed + dynamic_acceleration; //
+        }
+        else if (currentSpeed < DRIVE_AUTO_CREEP_SPEED_LIMIT) // 크립 주행
+        {
+          currentSpeed = currentSpeed + DRIVE_AUTO_CREEP_INCREMENT;
+        }
+
+        else
+        { // 자연 감속
+          currentSpeed = currentSpeed - NATURAL_DECEL_RATE;
+        }
+      
+        if (currentSpeed > MAX_SPEED_FORWARD)
+            currentSpeed = MAX_SPEED_FORWARD;
+
+        if (currentSpeed < 0) currentSpeed = 0.0;
+
+        break;
+
+      case 2: // Reverse (R)
+        if (received_Forward_pedal > 0) { // 엑셀 밟으면 -> 가속
+          received_forward_perc = (double)received_Forward_pedal / 100.0;
+          accel_range = current_Drive_Mode_Accel_MaxFactor - current_Drive_Mode_Accel_Base;
+          dynamic_acceleration = current_Drive_Mode_Accel_Base + (received_forward_perc * accel_range);
+          currentSpeed = currentSpeed + dynamic_acceleration;
+        }
+        else if (currentSpeed < DRIVE_AUTO_CREEP_SPEED_LIMIT)
+        { // 엑셀 안 밟고, 저속이면 -> 모드별 크립 주행
+          
+            currentSpeed =currentSpeed + DRIVE_AUTO_CREEP_INCREMENT;
+
+        }
+        else // 엑셀 안 밟고, 고속이면 -> 자연 감속
+        {
+          currentSpeed = currentSpeed - NATURAL_DECEL_RATE;
+        }
+      
+        if (currentSpeed > MAX_SPEED_REVERSE)
+            currentSpeed = MAX_SPEED_REVERSE;
+        if (currentSpeed < 0) 
+          currentSpeed = 0.0;
+        break;
+    }
+  }
+
+  // ===== 최종 계산 및 메시지 송신 =====
+  
+  msg_Speed.speed_signal = (long)currentSpeed;
+
+  currentFuelEfficiency = current_Drive_Mode_FuelBase;
+  if (currentSpeed > 50)
+  {
+      currentFuelEfficiency = currentFuelEfficiency - (currentSpeed - 50.0) / 100.0;
+  }
+
+  if (currentFuelEfficiency < 1.0) 
+    
+    currentFuelEfficiency = 1.0;
+  
+  msg_Speed.Fuel_Efficiency = (long)(currentFuelEfficiency * 10);
+
+  if (received_Gear == 2) // Reverse
+  {
+    current_Display_Speed = (long)(-currentSpeed);
+  }
+
+  else
+  {
+    current_Display_Speed = (long)currentSpeed;
+  }
+  
+  msg_Speed.Display_Speed = (long)(current_Display_Speed * 10);
+
+  output(msg_Speed);
+
+  setTimer(speed_Calculation_Timer, DRIVER_INPUT_PERIOD_MS);
+}
+
+on stopMeasurement
+{
+  write("VehicleECU CAPL 중지 (계측 종료).");
+}

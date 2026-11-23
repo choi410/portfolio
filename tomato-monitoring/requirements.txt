@@ -1,0 +1,6 @@
+flask
+# 아래는 라즈베리파이에서만 필요 (TOMATO_MOCK=1 이면 없어도 실행됨)
+adafruit-circuitpython-dht
+pyserial
+gpiozero
+smbus2

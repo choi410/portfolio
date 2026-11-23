@@ -1,0 +1,118 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>TOMATO / ENV · MONITOR</title>
+<style>
+  :root{--bg:#0d1117;--panel:#161b22;--line:#262d36;--text:#e6edf3;--muted:#8b949e;
+    --red:#ff6b6b;--blue:#79a8ff;--yellow:#f2c14e;--cyan:#5ad1e6;--green:#3fb950;--orange:#f0883e}
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--text);font-family:"Pretendard","Malgun Gothic",system-ui,sans-serif}
+  header{display:flex;justify-content:space-between;align-items:center;padding:12px 20px;border-bottom:1px solid var(--line);
+    font-family:ui-monospace,Consolas,monospace;letter-spacing:.25em;font-size:13px;color:var(--cyan)}
+  main{max-width:1100px;margin:0 auto;padding:16px;display:grid;gap:12px}
+  .panel{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:16px}
+  .score{display:grid;grid-template-columns:110px 1fr;gap:20px;align-items:center}
+  .ring{position:relative;width:110px;height:110px}
+  .ring svg{transform:rotate(-90deg)}
+  .ring b{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;font-size:30px}
+  .status{font-size:18px;font-weight:700;margin-bottom:6px}
+  .bars{display:grid;grid-template-columns:1fr 1fr;gap:8px 20px;margin-top:10px}
+  .bar{font-size:12px;color:var(--muted)}
+  .bar div{height:6px;background:var(--line);border-radius:3px;margin-top:4px;overflow:hidden}
+  .bar i{display:block;height:100%;border-radius:3px}
+  .advice{font-size:13px;color:var(--orange);margin:6px 0 0;padding-left:18px}
+  .optimal{font-size:12px;color:var(--muted)}
+  .cards{display:grid;grid-template-columns:repeat(4,1fr);gap:12px}
+  .card .label{font-size:12px;color:var(--muted)}
+  .card .value{font-family:ui-monospace,Consolas,monospace;font-size:38px;margin:6px 0 2px}
+  .card .unit{font-size:14px;color:var(--muted);margin-left:4px}
+  .wide{grid-column:span 2}
+  canvas{width:100%;height:140px}
+  .dot{display:inline-block;width:9px;height:9px;border-radius:50%;margin-right:6px;vertical-align:middle}
+  @media (max-width:760px){.cards{grid-template-columns:1fr 1fr}.wide{grid-column:span 2}.bars{grid-template-columns:1fr}}
+</style>
+</head>
+<body>
+<header><span>■ TOMATO / ENV · MONITOR</span><span id="clock">--:--:--</span></header>
+<main>
+  <section class="panel score">
+    <div class="ring">
+      <svg width="110" height="110"><circle cx="55" cy="55" r="46" stroke="#262d36" stroke-width="10" fill="none"/>
+        <circle id="arc" cx="55" cy="55" r="46" stroke="#f0883e" stroke-width="10" fill="none" stroke-linecap="round"
+          stroke-dasharray="289" stroke-dashoffset="289"/></svg>
+      <b id="total">--</b>
+    </div>
+    <div>
+      <div class="status" id="statusText">측정 대기 중</div>
+      <div class="optimal">적정: 온도 {{ optimal.temperature[0] }}~{{ optimal.temperature[1] }}°C · 습도 {{ optimal.humidity[0] }}~{{ optimal.humidity[1] }}% · PM2.5 ≤ {{ optimal.pm25[1] }}µg/m³ · 조도 {{ optimal.light[0] }}% 이상</div>
+      <div class="bars" id="bars"></div>
+      <ul class="advice" id="advice"></ul>
+    </div>
+  </section>
+
+  <section class="cards">
+    <div class="panel card"><div class="label">🌡 온도</div><div class="value" id="temperature" style="color:var(--red)">--</div><span class="unit">°C</span></div>
+    <div class="panel card"><div class="label">💧 습도</div><div class="value" id="humidity" style="color:var(--blue)">--</div><span class="unit">%</span></div>
+    <div class="panel card"><div class="label">🌫 PM2.5</div><div class="value" id="pm25" style="color:var(--yellow)">--</div><span class="unit">µg/m³</span></div>
+    <div class="panel card"><div class="label">🌫 PM10</div><div class="value" id="pm10" style="color:var(--yellow)">--</div><span class="unit">µg/m³</span></div>
+    <div class="panel card"><div class="label">☀ 조도</div><div class="value" id="light" style="color:var(--cyan)">--</div><span class="unit">%</span></div>
+    <div class="panel card"><div class="label">📏 거리 (HC-SR04)</div><div class="value" id="distance">--</div><span class="unit">cm</span></div>
+    <div class="panel card wide"><div class="label">🚶 움직임 감지 (AM312)</div><div class="value" id="motion" style="font-size:22px">--</div></div>
+  </section>
+
+  <section class="panel">
+    <div class="label" style="font-size:12px;color:var(--muted);margin-bottom:6px">
+      최근 추이 <span class="dot" style="background:var(--red)"></span>온도 <span class="dot" style="background:var(--blue)"></span>습도</div>
+    <canvas id="chart" width="1000" height="140"></canvas>
+  </section>
+</main>
+
+<script>
+const NAMES = {temperature:"온도", humidity:"습도", pm25:"미세먼지", light:"조도"};
+const fmt = v => v === null || v === undefined ? "--" : v;
+
+function scoreColor(s){ return s >= 80 ? "#3fb950" : s >= 50 ? "#f0883e" : "#ff6b6b"; }
+
+function render({latest, history}){
+  if (!latest.time) return;
+  document.getElementById("clock").textContent = latest.time;
+  for (const k of ["temperature","humidity","pm25","pm10","light","distance"])
+    document.getElementById(k).textContent = fmt(latest[k]);
+  if (latest.pm_warming_up){ pm25.textContent = "예열"; pm10.textContent = "예열"; }
+  motion.textContent = latest.motion === null ? "--" : latest.motion ? "● 감지됨" : "○ 없음";
+  motion.style.color = latest.motion ? "var(--green)" : "var(--muted)";
+
+  const sc = latest.score;
+  total.textContent = fmt(sc.total);
+  statusText.textContent = sc.status;
+  arc.style.stroke = scoreColor(sc.total ?? 0);
+  arc.setAttribute("stroke-dashoffset", 289 - 289 * (sc.total ?? 0) / 100);
+  bars.innerHTML = Object.keys(NAMES).map(k => [k, sc.items[k]]).map(([k, s]) =>
+    `<div class="bar">${NAMES[k]} ${fmt(s)}<div><i style="width:${s ?? 0}%;background:${scoreColor(s ?? 0)}"></i></div></div>`).join("");
+  advice.innerHTML = sc.advice.map(a => `<li>${a}</li>`).join("");
+  drawChart(history);
+}
+
+function drawChart(h){
+  const c = chart, ctx = c.getContext("2d"), W = c.width, H = c.height;
+  ctx.clearRect(0, 0, W, H);
+  const line = (key, color, min, max) => {
+    const pts = h.map((d, i) => [i / Math.max(1, h.length - 1) * W, d[key]]).filter(p => p[1] !== null);
+    if (pts.length < 2) return;
+    ctx.strokeStyle = color; ctx.lineWidth = 2; ctx.beginPath();
+    pts.forEach(([x, v], i) => { const y = H - (v - min) / (max - min) * H; i ? ctx.lineTo(x, y) : ctx.moveTo(x, y); });
+    ctx.stroke();
+  };
+  line("temperature", "#ff6b6b", 0, 40);
+  line("humidity", "#79a8ff", 0, 100);
+}
+
+async function tick(){
+  try { render(await (await fetch("/api/data")).json()); } catch (e) { statusText.textContent = "서버 연결 끊김"; }
+}
+tick(); setInterval(tick, 2000);
+</script>
+</body>
+</html>

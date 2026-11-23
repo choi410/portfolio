@@ -1,0 +1,218 @@
+/*@!Encoding:65001*/ //한국어 작성을 위해
+
+variables
+{
+  // 메시지 객체
+  message GearControl msgGearControl;
+  message Driver_input msgDriverInput;
+
+  // 상태 변수
+  int current_Gear = 0;
+  int current_BreakPedal = 0;
+  int current_ForwardPedal = 0;
+  int current_DrivingMode = 0;
+
+  // 페달 누름 상태를 저장하는 플래그 (0: 뗌, 1: 누름)
+  int Forward_Pedal_Pressed = 0;
+  int Break_Pedal_Pressed = 0;
+
+  // 타이머
+  msTimer driver_Input_Send_Timer;
+
+  // 상수
+  const float Scaling_value = 10.0;
+  const long DRIVER_INPUT_PERIOD_MS = 100;
+  const int PEDAL_INCREMENT_PER_TICK = 5;
+  const int PEDAL_DECREMENT_PER_TICK = 10;
+}
+
+on start
+{
+  write("Driver CAPL 시작. 사용 키: 'p/r/n/d' (기어), 'a' (엑셀), 'b' (브레이크), 'm' (모드).");
+
+  msgGearControl.id = 0x100; //TX 구현.
+  msgGearControl.dlc = 2;
+  msgGearControl.Gear = current_Gear;
+  output(msgGearControl);
+
+  msgDriverInput.id = 0x300; //TX 구현.
+  msgDriverInput.dlc = 8;
+  msgDriverInput.Break_pedal = 0;
+  msgDriverInput.Forward_pedal = 0;
+  msgDriverInput.Drive_mode = 0;
+  output(msgDriverInput);
+
+  write("Driver: 초기 상태 - 기어: P, 브레이크: 0%%, 엑셀: 0%%, 모드: Standard");
+}
+
+//  수정된 부분: 계기판 역할 (메시지 수신)
+
+on message Speed //RX 구현.
+{
+  double display_Speed;
+  double fuel_Efficiency;
+
+  display_Speed = this.Display_Speed / Scaling_value;
+  fuel_Efficiency = this.Fuel_Efficiency / Scaling_value;
+
+  write("계기판 수신: DisplaySpeed=%.1f km/h, FuelEfficiency=%.1f km/L", display_Speed, fuel_Efficiency);
+}
+
+// DriverInput 메시지를 주기적으로 전송하는 타이머
+on timer driver_Input_Send_Timer
+{
+  if (Forward_Pedal_Pressed == 1)
+  {
+    current_ForwardPedal = current_ForwardPedal + PEDAL_INCREMENT_PER_TICK;
+    if (current_ForwardPedal > 100)
+      current_ForwardPedal = 100;
+  }
+  else
+  {
+    current_ForwardPedal = current_ForwardPedal - PEDAL_DECREMENT_PER_TICK;
+    if (current_ForwardPedal < 0)
+      current_ForwardPedal = 0;
+  }
+
+  if (Break_Pedal_Pressed == 1)
+  {
+    current_BreakPedal = current_BreakPedal + PEDAL_INCREMENT_PER_TICK;
+    if (current_BreakPedal > 100)
+      current_BreakPedal = 100;
+  }
+  else
+  {
+    current_BreakPedal = current_BreakPedal - PEDAL_DECREMENT_PER_TICK;
+    if (current_BreakPedal < 0)
+      current_BreakPedal = 0;
+  }
+
+  msgDriverInput.Break_pedal = current_BreakPedal;
+  msgDriverInput.Forward_pedal = current_ForwardPedal;
+  msgDriverInput.Drive_mode = current_DrivingMode;
+  output(msgDriverInput);
+
+  if (Forward_Pedal_Pressed == 0 && Break_Pedal_Pressed == 0 && current_ForwardPedal == 0 && current_BreakPedal == 0)
+    cancelTimer(driver_Input_Send_Timer);
+  else
+    setTimer(driver_Input_Send_Timer, DRIVER_INPUT_PERIOD_MS);
+}
+
+// ------------------- 키보드 입력 처리 -------------------
+
+on key 'p'
+{
+  if (current_BreakPedal > 0)
+  {
+    current_Gear = 0;
+    msgGearControl.Gear = current_Gear;
+    output(msgGearControl);
+    write("Driver: 기어가 %d (P)로 변경되었습니다.", current_Gear);
+  }
+  else
+    write("Driver: P단 변속 실패! - 브레이크 페달이 눌리지 않았습니다.");
+}
+
+on key 'r'
+{
+  if (current_BreakPedal > 0)
+  {
+    current_Gear = 2;
+    msgGearControl.Gear = current_Gear;
+    output(msgGearControl);
+    write("Driver: 기어가 %d (R)로 변경되었습니다.", current_Gear);
+  }
+  else
+    write("Driver: R단 변속 실패! - 브레이크 페달이 눌리지 않았습니다.");
+}
+
+on key 'n'
+{
+  if (current_BreakPedal > 0)
+  {
+    current_Gear = 3;
+    msgGearControl.Gear = current_Gear;
+    output(msgGearControl);
+    write("Driver: 기어가 %d (N)으로 변경되었습니다.", current_Gear);
+  }
+  else
+    write("Driver: N단 변속 실패! - 브레이크 페달이 눌리지 않았습니다.");
+}
+
+on key 'd'
+{
+  if (current_BreakPedal > 0)
+  {
+    current_Gear = 1;
+    msgGearControl.Gear = current_Gear;
+    output(msgGearControl);
+    write("Driver: 기어가 %d (D)로 변경되었습니다.", current_Gear);
+  }
+  else
+    write("Driver: D단 변속 실패! - 브레이크 페달이 눌리지 않았습니다.");
+}
+
+on key 'a'
+{
+  if (Break_Pedal_Pressed == 1)
+  {
+    write("브레이크를 먼저 떼시오.");
+    return;
+  }
+
+  if (Forward_Pedal_Pressed == 0)
+  {
+    Forward_Pedal_Pressed = 1;
+    write("Driver: 엑셀 페달 [눌림]");
+  }
+  else
+  {
+    Forward_Pedal_Pressed = 0;
+    write("Driver: 엑셀 페달 [떼어짐]");
+  }
+
+  setTimer(driver_Input_Send_Timer, DRIVER_INPUT_PERIOD_MS);
+}
+
+on key 'b'
+{
+  
+  if (Forward_Pedal_Pressed == 1)
+  {
+    write(" 엑셀보다 브레이크 우선순위 높음.");
+    Forward_Pedal_Pressed = 0;
+    Break_Pedal_Pressed = 1;
+    
+  }
+  
+
+  if (Break_Pedal_Pressed == 0)
+  {
+    Break_Pedal_Pressed = 1;
+    write("Driver: 브레이크 페달 [눌림]");
+  }
+  else
+  {
+    Break_Pedal_Pressed = 0;
+    write("Driver: 브레이크 페달 [떼어짐]");
+  }
+
+  setTimer(driver_Input_Send_Timer, DRIVER_INPUT_PERIOD_MS);
+}
+
+on key 'm'
+{
+  current_DrivingMode = (current_DrivingMode + 1) % 3;
+  switch (current_DrivingMode)
+  {
+    case 0: write("Driver: 주행 모드 변경: %d (Standard)", current_DrivingMode); break; //기본
+    case 1: write("Driver: 주행 모드 변경: %d (Eco)", current_DrivingMode); break;
+    case 2: write("Driver: 주행 모드 변경: %d (Sport)", current_DrivingMode); break;
+  }
+}
+
+on stopMeasurement
+{
+  write("Driver CAPL 중지 (계측 종료).");
+  cancelTimer(driver_Input_Send_Timer);
+}
