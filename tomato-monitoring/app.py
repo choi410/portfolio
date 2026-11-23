@@ -65,7 +65,7 @@ def evaluate(data):
     total = round(sum(valid) / len(valid)) if valid else None
     if total is None:
         status = "측정 대기 중"
-    elif total >= 80:
+    elif total >= 80 and not advice:
         status = "좋음 · 생육 환경이 양호해요"
     elif total >= 50:
         status = "보통 · 환경 개선이 필요해요"
