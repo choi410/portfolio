@@ -8,5 +8,5 @@
 | [plc-stacker-crane](plc-stacker-crane) | PLC 기반 색상 인식 스태커 크레인 자동 적재 시스템 | LS XG5000, Ladder, Factory I/O, Modbus TCP |
 | [robodk-pick-and-place](robodk-pick-and-place) | RoboDK·Python 자동 조립·적재 공정 | RoboDK API, Python, 좌표 변환 |
 | [canoe-capl-vehicle](canoe-capl-vehicle) | CANoe·CAPL 차량 제어 시스템 | CANoe, CAPL, CANdb++ (DBC) |
-| [stm32-baremetal](stm32-baremetal) | STM32F103 베어메탈 드라이버 개발 (실습 26개 + 모터 제어) | C, ARM Cortex-M3, 레지스터 제어, Makefile |
+| [stm32-baremetal](stm32-baremetal) | STM32F103 Black Pill 베어메탈 드라이버 개발 (실습 26개 + L298N 모터 제어) | C, ARM Cortex-M3, 레지스터 제어, Makefile |
 | [tomato-monitoring](tomato-monitoring) | 라즈베리파이 기반 토마토 생육 환경 모니터링 | Raspberry Pi, Python, Flask, GPIO·I2C·UART |
